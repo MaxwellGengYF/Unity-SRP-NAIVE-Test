@@ -25,7 +25,7 @@
 
 	}
 	SubShader {
-    Cull off
+
 		Tags { "RenderType"="Opaque" }
 		LOD 200
 

@@ -76,8 +76,8 @@ ENDCG
 			uniform sampler2D _GBuffer2;
 			uniform sampler2D _GBuffer3;
 			uniform float _LightCount;
-			uniform float4 _LightWorldPos[256];
-			uniform float4 _LightFinalColor[256];
+			uniform float4 _LightWorldPos[512];
+			uniform float4 _LightFinalColor[512];
 			uniform float4 _DirectionalLightDir;
 			uniform float4 _DirectionalLightColor;
 			uniform float4 _FrustumCorner[4];
@@ -113,17 +113,30 @@ ENDCG
 				float4 ndtex = tex2D(_GBuffer2, i.uv);
 				float3 normal = normalize(ndtex.rgb * 2 - 1);
 				float linearDepth = ndtex.a;
+				
 				float3 emission = tex2D(_GBuffer3, i.uv).xyz;
 				float3 worldPos = lerp(_WorldSpaceCameraPos, i.farPlanePos, linearDepth);
 				float oneMinusReflectivity = 1 - SpecularStrength(specular.rgb);
 				UnityLight light;
 				light.dir = normalize(_DirectionalLightDir.xyz);
 				light.color = _DirectionalLightColor.xyz;
-				float atten;
-				
-				float4 col = BRDF(diffuse.rgb * diffuse.a, specular.rgb, oneMinusReflectivity,specular.a,normal, normalize(_WorldSpaceCameraPos - i.farPlanePos), light);
+				diffuse.xyz /= diffuse.a;
+				float3 viewDir = normalize(_WorldSpaceCameraPos - i.farPlanePos);
+				float4 col = BRDF(diffuse.xyz, specular.xyz, oneMinusReflectivity,specular.a,normal, viewDir, light);
+				for(int i = 0; i < _LightCount; ++i){
+					float4 lightPosAndRange = _LightWorldPos[i];
+					float3 lightDir = lightPosAndRange.xyz - worldPos;
+					float dist = dot(lightDir, lightDir);
+					if(step(lightPosAndRange.w * lightPosAndRange.w, dist))
+						continue;
+					dist = sqrt(dist);
+					float3 lightFinalColor = _LightFinalColor[i].xyz * (1 - dist/lightPosAndRange.w);
+					light.dir = normalize(lightDir);
+					light.color = lightFinalColor;
+					col += BRDF(diffuse.xyz, specular.xyz, oneMinusReflectivity,specular.a,normal, viewDir, light);
+				}
 				col.rgb += emission;
-				col.a = step(0.00001, linearDepth);
+				col.a = step(linearDepth,0.999);
 				return col;
 			}
 			ENDCG

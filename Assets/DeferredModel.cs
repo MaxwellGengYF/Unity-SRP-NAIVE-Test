@@ -31,6 +31,8 @@ public class OpaqueAssetPipeInstance : RenderPipeline
     Material deferredmat;
     RenderTargetIdentifier[] gBuffers = new RenderTargetIdentifier[4];
     Vector4[] frustumCorner = new Vector4[4];
+    Vector4[] _LightWorldPosArray = new Vector4[512];
+    Vector4[] _LightWorldColorArray = new Vector4[512];
     public OpaqueAssetPipeInstance(Shader shader)
     {
         deferredmat = new Material(shader);
@@ -89,9 +91,9 @@ public class OpaqueAssetPipeInstance : RenderPipeline
             cmd.GetTemporaryRT(gBuffer2, width, height, 0, FilterMode.Trilinear, RenderTextureFormat.ARGBFloat);
             cmd.GetTemporaryRT(gBuffer3, width, height, 0, FilterMode.Trilinear, RenderTextureFormat.ARGBFloat);
             cmd.SetRenderTarget(gBuffers, gBuffer0);
-            cmd.ClearRenderTarget(true, true, new Color(0, 0, 0, 0));
-
-            var mainLightIndex = GetMainLight(cull.visibleLights);
+            cmd.ClearRenderTarget(true, true, Color.black);
+            var visibleLights = cull.visibleLights;
+            var mainLightIndex = GetMainLight(visibleLights);
             if (mainLightIndex < 0)
             {
                 cmd.SetGlobalVector("_DirectionalLightDir", new Vector3(0, 1, 0));
@@ -99,14 +101,26 @@ public class OpaqueAssetPipeInstance : RenderPipeline
             }
             else
             {
-                var mainLight = cull.visibleLights[mainLightIndex];
+                var mainLight = visibleLights[mainLightIndex];
                 cmd.SetGlobalVector("_DirectionalLightDir", -mainLight.light.transform.forward);
                 cmd.SetGlobalColor("_DirectionalLightColor", mainLight.finalColor);
+                RemoveFromList(visibleLights, mainLightIndex);
             }
-            frustumCorner[0] = camera.ViewportToWorldPoint(new Vector3(0, 0, 1));
-            frustumCorner[1] = camera.ViewportToWorldPoint(new Vector3(1, 0, 1));
-            frustumCorner[2] = camera.ViewportToWorldPoint(new Vector3(0, 1, 1));
-            frustumCorner[3] = camera.ViewportToWorldPoint(new Vector3(1, 1, 1));
+            var lightCount = Mathf.Min(256, visibleLights.Count);
+            for (int i = 0; i < lightCount; ++i)
+            {
+                var light = visibleLights[i];
+                var pos = light.light.transform.position;
+                _LightWorldPosArray[i] = new Vector4(pos.x, pos.y, pos.z, light.range);
+                _LightWorldColorArray[i] = light.finalColor;
+            }
+            cmd.SetGlobalVectorArray("_LightWorldPos", _LightWorldPosArray);
+            cmd.SetGlobalFloat("_LightCount", lightCount);
+            cmd.SetGlobalVectorArray("_LightFinalColor", _LightWorldColorArray);
+            frustumCorner[0] = camera.ViewportToWorldPoint(new Vector3(0, 0, camera.farClipPlane));
+            frustumCorner[1] = camera.ViewportToWorldPoint(new Vector3(1, 0, camera.farClipPlane));
+            frustumCorner[2] = camera.ViewportToWorldPoint(new Vector3(0, 1, camera.farClipPlane));
+            frustumCorner[3] = camera.ViewportToWorldPoint(new Vector3(1, 1, camera.farClipPlane));
             cmd.SetGlobalVectorArray("_FrustumCorner", frustumCorner);
             context.ExecuteCommandBuffer(cmd);
 
