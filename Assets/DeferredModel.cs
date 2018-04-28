@@ -1,10 +1,13 @@
 ﻿using System;
+using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Experimental.Rendering;
 [ExecuteInEditMode]
 public class OpaqueAssetPipe : RenderPipelineAsset
 {
+    public Shader deferredShading;
 #if UNITY_EDITOR
     [UnityEditor.MenuItem("SRP-Demo/Deferred")]
     static void CreateBasicAssetPipeline()
@@ -15,7 +18,7 @@ public class OpaqueAssetPipe : RenderPipelineAsset
 #endif
     protected override IRenderPipeline InternalCreatePipeline()
     {
-        return new OpaqueAssetPipeInstance();
+        return new OpaqueAssetPipeInstance(deferredShading);
     }
 }
 public class OpaqueAssetPipeInstance : RenderPipeline
@@ -25,9 +28,12 @@ public class OpaqueAssetPipeInstance : RenderPipeline
     int gBuffer1;
     int gBuffer2;
     int gBuffer3;
+    Material deferredmat;
     RenderTargetIdentifier[] gBuffers = new RenderTargetIdentifier[4];
-    public OpaqueAssetPipeInstance()
+    Vector4[] frustumCorner = new Vector4[4];
+    public OpaqueAssetPipeInstance(Shader shader)
     {
+        deferredmat = new Material(shader);
         gBuffer0 = Shader.PropertyToID("_GBuffer0");
         gBuffer1 = Shader.PropertyToID("_GBuffer1");
         gBuffer2 = Shader.PropertyToID("_GBuffer2");
@@ -36,6 +42,25 @@ public class OpaqueAssetPipeInstance : RenderPipeline
         gBuffers[1] = gBuffer1;
         gBuffers[2] = gBuffer2;
         gBuffers[3] = gBuffer3;
+    }
+
+    public static void RemoveFromList<T>(List<T> list, int index)
+    {
+        int sz = list.Count - 1;
+        list[index] = list[sz];
+        list.RemoveAt(sz);
+    }
+
+    public static int GetMainLight(List<VisibleLight> visibleLights)
+    {
+        for (int i = 0, length = visibleLights.Count; i < length; ++i)
+        {
+            if (visibleLights[i].lightType == LightType.Directional)
+            {
+                return i;
+            }
+        }
+        return -1;
     }
     public override void Render(ScriptableRenderContext context, Camera[] cameras)
     {
@@ -64,15 +89,40 @@ public class OpaqueAssetPipeInstance : RenderPipeline
             cmd.GetTemporaryRT(gBuffer2, width, height, 0, FilterMode.Trilinear, RenderTextureFormat.ARGBFloat);
             cmd.GetTemporaryRT(gBuffer3, width, height, 0, FilterMode.Trilinear, RenderTextureFormat.ARGBFloat);
             cmd.SetRenderTarget(gBuffers, gBuffer0);
-            cmd.ClearRenderTarget(true, true, Color.grey);
+            cmd.ClearRenderTarget(true, true, new Color(0, 0, 0, 0));
+
+            var mainLightIndex = GetMainLight(cull.visibleLights);
+            if (mainLightIndex < 0)
+            {
+                cmd.SetGlobalVector("_DirectionalLightDir", new Vector3(0, 1, 0));
+                cmd.SetGlobalColor("_DirectionalLightColor", Color.black);
+            }
+            else
+            {
+                var mainLight = cull.visibleLights[mainLightIndex];
+                cmd.SetGlobalVector("_DirectionalLightDir", -mainLight.light.transform.forward);
+                cmd.SetGlobalColor("_DirectionalLightColor", mainLight.finalColor);
+            }
+            frustumCorner[0] = camera.ViewportToWorldPoint(new Vector3(0, 0, 1));
+            frustumCorner[1] = camera.ViewportToWorldPoint(new Vector3(1, 0, 1));
+            frustumCorner[2] = camera.ViewportToWorldPoint(new Vector3(0, 1, 1));
+            frustumCorner[3] = camera.ViewportToWorldPoint(new Vector3(1, 1, 1));
+            cmd.SetGlobalVectorArray("_FrustumCorner", frustumCorner);
             context.ExecuteCommandBuffer(cmd);
-            cmd.Release();
+
             var settings = new DrawRendererSettings(camera, new ShaderPassName("Deferred"));
             settings.sorting.flags = SortFlags.CommonOpaque;
             var filterSettings = new FilterRenderersSettings(true) { renderQueueRange = RenderQueueRange.opaque };
-            cmd = new CommandBuffer();
             context.DrawRenderers(cull.visibleRenderers, ref settings, filterSettings);
+            cmd.Clear();
+            cmd.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
+            context.ExecuteCommandBuffer(cmd);
+            cmd.Clear();
             context.DrawSkybox(camera);
+            cmd.Blit(null, BuiltinRenderTextureType.CameraTarget, deferredmat);
+            context.ExecuteCommandBuffer(cmd);
+            cmd.Release();
+
             context.Submit();
         }
     }

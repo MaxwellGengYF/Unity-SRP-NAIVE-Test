@@ -11,3 +11,4 @@ MonoBehaviour:
   m_Script: {fileID: 0}
   m_Name: OpaqueDeferred
   m_EditorClassIdentifier: Assembly-CSharp::OpaqueAssetPipe
+  deferredShading: {fileID: 4800000, guid: 051482cad3113e44c9902b7c4ed2ec33, type: 3}
